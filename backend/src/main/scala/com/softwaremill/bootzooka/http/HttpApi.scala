@@ -23,6 +23,9 @@ import org.http4s.syntax.kleisli._
 import Http4sCorrelationMiddleware.source
 
 import scala.concurrent.ExecutionContext
+import sttp.client.SttpBackend
+import sttp.client.RequestT
+import sttp.model.Uri
 
 /**
   * Interprets the endpoint descriptions (defined using tapir) as http4s routes, adding CORS, metrics, api docs
@@ -39,7 +42,8 @@ class HttpApi(
     endpoints: ServerEndpoints,
     adminEndpoints: ServerEndpoints,
     collectorRegistry: CollectorRegistry,
-    config: HttpConfig
+    config: HttpConfig,
+    baseSttpBackend: SttpBackend[Task, Nothing, Nothing]
 ) extends StrictLogging {
   private val apiContextPath = "/api/v1"
   private val endpointsToRoutes = new EndpointsToRoutes(http, apiContextPath)
@@ -84,12 +88,13 @@ class HttpApi(
   private val respondWithNotFound: HttpRoutes[Task] = Kleisli(_ => OptionT.pure(Response.notFound))
   private val respondWithIndex: HttpRoutes[Task] = Kleisli(req => OptionT.liftF(indexResponse(req)))
 
-  private def loggingMiddleware(service: HttpRoutes[Task]): HttpRoutes[Task] = Kleisli { req: Request[Task] =>
-    OptionT(for {
-      _ <- Task(logger.debug(s"Starting request to: ${req.uri.path}"))
-      r <- service(req).value
-    } yield r)
-  }
+  private def loggingMiddleware(service: HttpRoutes[Task]): HttpRoutes[Task] =
+    Kleisli { req: Request[Task] =>
+      OptionT(for {
+        _ <- Task(logger.debug(s"Starting request to: ${req.uri.path}"))
+        r <- service(req).value
+      } yield r)
+    }
 
   /**
     * Serves the webapp resources (html, js, css files), from the /webapp directory on the classpath.
@@ -99,6 +104,27 @@ class HttpApi(
     import dsl._
     val rootRoute = HttpRoutes.of[Task] {
       case request @ GET -> Root => indexResponse(request)
+      case request @ GET -> Root / "sttp-test" / "oauth-callback" => {
+        val authCode = request.params("code")
+        println(s"authCode=$authCode")
+        import sttp.client._
+        implicit val be = baseSttpBackend
+        val tokenRequest = basicRequest
+          .post(uri"https://github.com/login/oauth/access_token?code=$authCode&grant_type=authorization_code")
+          .auth
+          .basic("a4d2149ce78c789ff422", "b568efc2bc187720e4a42f0eb5efb73f76071374")
+          //.header("accept","application/json")
+        val authResponse = tokenRequest.response(asParams).send()
+        authResponse.flatMap { authResp =>
+          println(authResp.code)
+          println(authResp.body.fold(identity, identity))
+          println(authResp.headers)
+          Ok(s"${authResp.body}")
+        }
+        //authResponse
+
+        //3 - odpowiedź... println token
+      }
     }
     val resourcesRoutes = resourceService[Task](ResourceService.Config("/webapp", staticFileBlocker))
     rootRoute <+> resourcesRoutes

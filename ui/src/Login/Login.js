@@ -57,6 +57,7 @@ class Login extends Component {
               onBlur={() => this.handleBlur('password')} />
             { this.state.touchedControls.password && this.state.values.password.length < 1 ? <p className="validation-message">password is required!</p> : null }
             <Link to="/recover-lost-password">Forgot password?</Link>
+            <a href="https://github.com/login/oauth/authorize?client_id=a4d2149ce78c789ff422&">Login with Github</a>
             <input type="submit" value="Sign in" className="button-primary" disabled={!this.isValid()} />
           </form>
         </div>
